@@ -1,116 +1,144 @@
-# AI-Based Restoration of Degraded Images for Semiconductor Inspection
+AI-Based Restoration of Degraded Images for Semiconductor Inspection
+SEMICON India Hackathon 2026 — KLA Track, Phase 1 Submission
+Team: NAADAN PARINDE, Chandigarh University
 
-**SEMICON India Hackathon 2026 — KLA Track (Phase 1 Submission)**  
-**Team Name:** NAADAN PARINDE  
-**Problem Statement:** Restoration of low-resolution, noisy semiconductor defect inspection images to clean, high-resolution ground truth.
+Problem Statement
 
----
+Semiconductor inspection images are degraded by two combined effects, applied in an undisclosed order:
+speckle noise plus additive Gaussian noise, and downsampling (for example a 256x256 ground-truth image
+shrunk to 128x128). Given only the degraded "NoisyLR" image, the task is to produce a restored image at
+the original ground-truth resolution that is as close as possible to the ground truth. The hidden test
+set contains only degraded inputs; scoring is done on PSNR, SSIM, LPIPS, and end-to-end runtime.
 
-## 📌 Executive Summary
+Approach
 
-Semiconductor inspection images require clean, sharp details; however, noise and downsampling can hide critical defects. The degraded input images provided in this track contain a mix of speckle noise, Gaussian noise, and downsampling.
+The pipeline bicubic-upscales the degraded image to the target resolution, then passes it through a
+lightweight residual U-Net that learns a residual correction for denoising and detail recovery. Output is
+clipped to [0, 1] before saving. Bicubic upscaling handles resizing deterministically, so the network only
+needs to learn denoising and detail correction rather than resizing and restoration jointly — a simpler,
+faster-to-train, and easier-to-explain design given the hackathon timeline.
 
-This repository provides an end-to-end, lightweight AI restoration pipeline designed to take these degraded inputs and output cleaner, sharper images at the expected ground-truth resolution. The pipeline is optimized for image quality (PSNR, SSIM, LPIPS) and fast end-to-end inference runtime.
+Model: SmallResidualUNet, a lightweight residual U-Net. Input is the bicubic-upscaled grayscale NoisyLR
+image; output is the restored grayscale image, clipped to [0, 1]; the network predicts a residual
+correction on top of the bicubic upscale rather than the full image from scratch.
 
----
+Training setup: L1 pixel loss, AdamW optimizer, 50 epochs, batch size 4, augmentation with horizontal
+flip, vertical flip, and 90-degree rotations, checkpoint selected by best validation PSNR, automatic 90/10
+train-validation split with a fixed seed of 42. Trained on a MacBook Pro with an Apple M5 Pro chip, 24 GB
+RAM, using Apple MPS.
 
-## 🚀 Key Features
+Repository Structure
 
-* **Lightweight Restoration Engine:** Compact CNN/U-Net architecture optimized for minimal runtime overhead and GPU/CPU portability.
-* **Deterministic Input/Output Contract:** Strictly preserves source filenames across `.npy` raw feature arrays and `.png` visual inspection maps.
-* **Dynamic Resolution Scaling:** Supports arbitrary test batch sizes and automated spatial upscaling (2x factor baseline).
-* **Zero Hardcoded Dependencies:** Fully parameterized via CLI flags and YAML configuration files for frictionless judge evaluation.
-* **Evaluation Metric Ready:** Built-in support for standardized PSNR, SSIM, and LPIPS benchmarking.
+repository/
+  README.md
+  requirements.txt
+  train.py
+  inference.py
+  configs/default.yaml
+  src/__init__.py
+  src/data.py
+  src/model.py
+  checkpoints/best_model.pt
+  outputs/bicubic/
+  outputs/restored/
+  results/metrics.json
+  results/samples/
 
----
+Setup
 
-## 📁 Project Architecture & Structure
-KLA-Hackathon-Submission/
-|-- configs/
-|   -- default.yaml          # Hyperparameters, batch sizes, and relative paths |-- checkpoints/ |   -- best_model.pt         # Pretrained model weights checkpoint
-|-- src/
-|   |-- init.py           # Package module initializer
-|   |-- data.py               # Dataset loader, paired transforms & tensor normalization
-|   -- model.py              # Restoration network architecture definition |-- outputs/                  # Automated target directory for evaluation outputs |   |-- bicubic/              # Baseline upscaled comparison outputs |   -- restored/             # Model-restored final predictions (.npy and .png)
-|-- train.py                  # Training pipeline with validation tracking
-|-- inference.py              # Standalone evaluation & inference CLI tool
-|-- requirements.txt          # Minimal pinned environment dependencies
-`-- README.md                 # Project documentation and reproduction guide
+Clone the repository and install dependencies in a clean environment.
 
----
+git clone https://github.com/rounaksharma0123/kla-image-restoration.git && cd kla-image-restoration
 
-## ⚙️ System Requirements
+python3 -m venv venv && source venv/bin/activate
 
-* **Python:** 3.10 or 3.11 (recommended)
-* **Hardware:** CUDA-capable GPU (optional, automatic fallback to CPU)
-* **Memory:** ~2 GB RAM / VRAM minimum for standard inspection batches
+python3 -m pip install -r requirements.txt
 
----
+Dataset Layout
 
-## 🛠️ Installation & Setup
+Place the dataset as shown below before running training or inference. The loader creates the
+train/validation split automatically, so no manual pre-splitting is required.
 
-### 1. Clone the Repository
-```bash
-git clone [https://github.com/rounaksharma0123/KLA-Hackathon-Submission.git](https://github.com/rounaksharma0123/KLA-Hackathon-Submission.git)
-cd KLA-Hackathon-Submission
-```
+data/train/GT/          clean ground-truth images
+data/train/NoisyLR/     matching degraded images, same filenames as GT
+data/NoisyLR/           public or hidden test images, degraded only, no GT
 
-2. Environment Setup
-Windows (PowerShell / Command Prompt): ```
-python -m venv venv
-venv\Scripts\activate
-pip install -r requirements.txt ```
+Supported formats: .npy, .png, .jpg, .jpeg, .tif, .tiff, .bmp.
 
-macOS / Linux: ```
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt ```
+Training
 
-🧪 Inference & Evaluation Guide
-The standalone inference script processes raw input folders containing degraded images, runs end-to-end tensor normalization, executes the model forward pass, and persists restored predictions.
+Reproduce the submitted checkpoint with the command below. It writes per-epoch loss and PSNR logs and
+saves the best-performing checkpoint to checkpoints/best_model.pt.
 
-Standard Inference Command ```
-python3 inference.py --checkpoint checkpoints/best_model.pt --input-dir /path/to/NoisyLR --output-dir outputs/restored --scale 2 --save-png ```
+python3 train.py --epochs 50 --batch-size 4
 
-Argument Reference
---checkpoint: Path to trained weight file (checkpoints/best_model.pt).
+Inference
 
---input-dir: Absolute or relative path to folder containing degraded input images (NoisyLR).
+inference.py is standalone: it takes an input directory and an output directory and requires no manual
+source-code edits to run.
 
---output-dir: Destination path where restored images will be written.
+Run the trained model on a folder of degraded images:
 
---scale: Spatial upscaling factor (Default: 2).
+python3 inference.py --checkpoint checkpoints/best_model.pt --input-dir data/NoisyLR --output-dir outputs/restored --scale 2 --save-png
 
---save-png: Optional flag to output visual .png previews alongside .npy arrays.
+Run the bicubic-only baseline for comparison, with no trained weights:
 
-Input/Output Contract
-Input Directory: Contains arbitrary degraded grayscale images (e.g., sample_001.png or sample_001.npy).
+python3 inference.py --input-dir data/NoisyLR --output-dir outputs/bicubic --scale 2 --save-png
 
-Output Directory: Predictions are written retaining the exact original filenames.
+If input images are already full resolution and no 2x upscale is needed:
 
-Value Range: Output arrays are clipped to [0.0, 1.0] range for exact evaluation scoring.
+python3 inference.py --checkpoint checkpoints/best_model.pt --input-dir data/NoisyLR --output-dir outputs/restored --scale 1 --save-png
 
-🏋️ Training Reproduction
-To retrain or fine-tune the restoration model on paired ground-truth inspection datasets: ```
-python3 train.py --epochs 50 --batch-size 4 ```
+Arguments: --checkpoint (path to trained weights; omit for the bicubic-only baseline), --input-dir
+(required, folder of degraded images), --output-dir (required, folder for restored images), --scale
+(required, 2 for the trained setup of 128x128 to 256x256, or 1 if input is already full resolution),
+--save-png (optional, also saves human-viewable PNG previews alongside the raw output).
 
-Hyperparameters such as base channels, learning rate, and validation split fraction can be customized directly in configs/default.yaml.
+Input/output contract: the input folder contains degraded NoisyLR images; the output folder receives
+restored images with the same base filename as the input. The script always saves the raw restored array
+as .npy, and additionally saves a .png preview when --save-png is set. Output values are clipped to
+[0, 1] before saving, since scoring is done on exactly what is written to disk. The script runs on GPU or
+MPS if available and falls back to CPU automatically, and it prints the total end-to-end runtime covering
+read, preprocessing, model execution, postprocessing, and save.
 
-📊 Technical Approach & Method
-Preprocessing & Tensor Normalization: Robust range scaling handling float/integer arrays safely without assuming prior [0, 1] bounding.
+Results
 
-Spatial Alignment & Upscaling: Bicubic / feature-space pre-upsampling mapping degraded inputs into target ground-truth coordinate space.
+Best validation PSNR is 25.49 dB, the measured score used to select the checkpoint during training. Full
+baseline-versus-final numbers for PSNR, SSIM, LPIPS, and per-image runtime are generated by the evaluation
+run into results/metrics.json, so the figures stay in sync with the actual output files rather than being
+duplicated here.
 
-Deep Residual Denoising: Multiscale feature extraction penalizing structural and pixel-wise deviations via combined L1 and perceptual/SSIM objective formulations.
+The validation set is an automatic 90/10 split of the official training pairs, seed 42, never used during
+training. The public test set of 400 NoisyLR images, 128x128 restored to 256x256, was processed end to end
+without errors. Two successful restorations and one representative failure case are included in
+results/samples/.
 
-Post-Processing: Range clipping [0, 1] to prevent artifact overflow prior to metric computation.
+Limitations
 
-⚠️ Known Constraints & Edge Cases
-Strict Grayscale Modality: The network processes single-channel defect maps; multi-channel RGB inputs are converted or treated as single-channel inspection frames.
+The model was trained for only 50 epochs on a single hardware setup under a tight hackathon timeline and
+has not been extensively hyperparameter-tuned. Only L1 loss was used, with no perceptual or adversarial
+loss term, so perceptual quality as measured by LPIPS may lag behind pixel-level PSNR and SSIM. Data
+augmentation was limited to flips and 90-degree rotations, with no synthetic re-degradation or further
+augmentation explored due to time constraints. The model was trained assuming a fixed 2x resolution gap,
+and behaviour at other scale factors has not been separately validated. No external pretrained models or
+public datasets were used; training relied solely on the official KLA-provided pairs, which reduces risk
+but also limits generalization compared to larger-scale pretraining.
 
-Extreme Downsampling Degradation: In severe subsampling scenarios, extreme sub-surface structural textures may rely on prior regularized smoothing.
+Next Steps
 
-👥 Team NAADAN PARINDE — Work AllocationMemberPrimary ResponsibilitiesDeliverablesMember 1Repository Architecture, Packaging, Dependency Isolation, CLI ContractPublic Repo, README.md, requirements.txt, Packaging CheckMember 2Dataset Profiling, Train/Val Split Formulation, Quantitative MetricsPaired Split Validation, PSNR/SSIM/LPIPS Baseline BenchmarksMember 3Neural Architecture Design, Loss Formulations, Training & Checkpointsmodel.py, train.py, Model Checkpoints (best_model.pt)Member 4Solution Presentation, Technical Documentation, Video Walkthrough8–9 Slide Presentation Deck, 5-Minute Solution Demo Video
+Add SSIM or edge-aware loss terms to improve structural fidelity beyond plain L1. Extend training duration
+and run a proper hyperparameter sweep over learning rate and batch size. Benchmark against a second
+architecture, such as deeper residual blocks or a small transformer, for comparison. Optimize inference
+throughput through batching and mixed precision for the H100 evaluation benchmark.
 
-📜 License & Acknowledgments
-Developed for academic and competitive evaluation under SEMICON India Hackathon 2026 — KLA Track.
+External Resources
+
+No external pretrained weights or public datasets were used. All code — model, training loop, and data
+loader — was written by the team specifically for this challenge, using only the official KLA-provided
+dataset.
+
+Reproducing This Submission
+
+git clone https://github.com/rounaksharma0123/kla-image-restoration.git && cd kla-image-restoration && python3 -m pip install -r requirements.txt && python3 train.py --epochs 50 --batch-size 4 && python3 inference.py --checkpoint checkpoints/best_model.pt --input-dir data/NoisyLR --output-dir outputs/restored --scale 2 --save-png
+
+Team NAADAN PARINDE — SEMICON India Hackathon 2026, KLA Track
