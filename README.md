@@ -42,8 +42,14 @@ fast to train, and easy to explain.
 ## Installation
 
 ```
-git clone https://github.com/rounaksharma0123/kla-image-restoration.git && cd kla-image-restoration
+git clone https://github.com/rounaksharma0123/KLA-Hackathon-Submission.git && cd KLA-Hackathon-Submission
+```
+
+```
 python3 -m venv venv && source venv/bin/activate
+```
+
+```
 python3 -m pip install -r requirements.txt
 ```
 
