@@ -1,0 +1,11 @@
+data_root: data/
+epochs: 50
+batch_size: 4
+learning_rate: 0.0002
+base_channels: 32
+val_fraction: 0.1
+num_workers: 0
+seed: 42
+device: auto
+output: checkpoints/best_model.pt
+overfit_count: 0
