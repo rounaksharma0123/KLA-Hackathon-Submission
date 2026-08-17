@@ -20,7 +20,7 @@ from src.model import build_model
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Restore low-resolution grayscale images.")
-    parser.add_argument("--input-dir", default="/Users/kishan/Downloads/Data-public/NoisyLR")
+    parser.add_argument("--input-dir", default="/Users/kishan/Downloads/Data-public/train/NoisyLR")
     parser.add_argument("--output-dir", default="outputs/restored")
     parser.add_argument("--checkpoint", default="")
     parser.add_argument("--device", default="auto")
