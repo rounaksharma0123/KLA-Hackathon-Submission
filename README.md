@@ -64,7 +64,9 @@ data/
 ```
 
 Supported formats: `.npy`, `.png`, `.jpg`, `.jpeg`, `.tif`, `.tiff`, `.bmp`. The train/validation split is
-created automatically from `data/train/`.
+created automatically from `data/train/` (90/10, fixed seed 42) — no separate validation folder is
+required, and the same split logic in `src/data.py` is what evaluation reuses, so metrics below are always
+computed on data the model never trained on.
 
 ## Training
 
@@ -103,6 +105,18 @@ Output images keep the same base filename as the input, are clipped to `[0, 1]` 
 GPU/MPS with automatic CPU fallback, and the script prints total end-to-end runtime (read, preprocess,
 model, postprocess, save).
 
+## Evaluation
+
+<!-- TODO: confirm this matches the actual CLI in src/metrics.py / src/visualize.py -->
+```
+python3 src/metrics.py
+python3 src/visualize.py
+```
+
+`src/metrics.py` computes PSNR, SSIM, and LPIPS for both `outputs/bicubic` and `outputs/restored` against
+the held-out validation ground truth, and writes `results/metrics.json`. `src/visualize.py` generates
+before/after comparison grids into `results/samples/`.
+
 ## Project structure
 
 ```
@@ -117,6 +131,8 @@ repository/
     __init__.py
     data.py          # dataset loading, pairing, normalization, augmentation
     model.py          # SmallResidualUNet architecture
+    metrics.py         # PSNR / SSIM / LPIPS evaluation, baseline vs. final
+    visualize.py        # before/after visual grid generation
   checkpoints/
     best_model.pt     # final trained weights
   outputs/
@@ -129,10 +145,18 @@ repository/
 
 ## Results
 
-Best validation PSNR: **25.49 dB**, the score used to select the checkpoint during training. Full
-baseline-versus-final PSNR, SSIM, LPIPS, and per-image runtime are generated into `results/metrics.json`
-by the evaluation run, so the numbers stay in sync with the actual output files rather than being
-duplicated here.
+Best validation PSNR during training (used for checkpoint selection): **25.49 dB**.
+
+Full evaluation on the held-out validation split (90/10, seed 42, never seen during training):
+
+| Metric | Bicubic Baseline | Final Restored Model | Improvement |
+|---|---|---|---|
+| PSNR (higher is better) | 22.93 dB | **28.28 dB** | +5.35 dB |
+| SSIM (higher is better) | 0.5372 | **0.7597** | +0.2225 |
+| LPIPS (lower is better) | 0.4655 | **0.3972** | −0.0683 |
+
+The model improves on the bicubic baseline across all three metrics — a >5 dB PSNR gain, a substantial
+structural-similarity improvement, and a lower (better) perceptual distance.
 
 The validation set is an automatic 90/10 split (seed 42) never used during training. The public test set
 of 400 `NoisyLR` images (128x128 → 256x256) was processed end to end without errors. Two successful
@@ -140,9 +164,13 @@ restorations and one representative failure case are in `results/samples/`.
 
 ## Limitations
 
+- **High-frequency texture smoothing:** while effective at suppressing severe speckle and Gaussian noise,
+  the model can be overly aggressive on fine, complex texture patterns, softening detail that a human
+  inspector might still want to see — visible in the failure case in `results/samples/`.
 - Trained for only 50 epochs on a single hardware setup, under hackathon time pressure — not
   extensively hyperparameter-tuned.
-- Only L1 loss was used, no perceptual or adversarial term, so LPIPS may lag behind PSNR/SSIM.
+- Only L1 loss was used, no perceptual or adversarial term, which likely explains why the LPIPS
+  improvement is smaller in relative terms than the PSNR/SSIM gains.
 - Augmentation limited to flips and 90-degree rotations; no synthetic re-degradation was explored.
 - Trained for a fixed 2x resolution gap; behaviour at other scale factors is untested.
 - No external pretrained models or public datasets were used — training relied solely on the official
@@ -150,7 +178,7 @@ restorations and one representative failure case are in `results/samples/`.
 
 ## Next steps
 
-- Add SSIM or edge-aware loss terms to improve structural fidelity.
+- Add SSIM or edge-aware loss terms to reduce high-frequency over-smoothing and improve LPIPS.
 - Extend training and run a proper hyperparameter sweep.
 - Benchmark against a second architecture for comparison.
 - Optimize inference throughput (batching, mixed precision) for the H100 evaluation benchmark.
